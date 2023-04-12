@@ -23,6 +23,10 @@ impl BlockBuilder {
         }
     }
 
+    pub fn block_size(&self) -> usize {
+        self.block_size
+    }
+
     /// Adds a key-value pair to the block. Returns false when the block is full.
     #[must_use]
     pub fn add(&mut self, key: &[u8], value: &[u8]) -> bool {
