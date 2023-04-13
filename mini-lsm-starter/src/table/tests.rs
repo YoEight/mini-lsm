@@ -104,10 +104,9 @@ fn test_sst_iterator() {
 fn test_sst_seek_key() {
     let (_dir, sst) = generate_sst();
     let sst = Arc::new(sst);
-    let mut iter = SsTableIterator::create_and_seek_to_key(sst, &key_of(0)).unwrap();
+    let mut iter = SsTableIterator::create_and_seek_to_key(sst.clone(), &key_of(0)).unwrap();
     for offset in 1..=5 {
         for i in 0..num_of_keys() {
-            println!("Offset = {}, i = {}", offset, i);
             let key = iter.key();
             let value = iter.value();
             assert_eq!(

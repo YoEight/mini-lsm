@@ -148,7 +148,7 @@ impl SsTable {
             }
         }
 
-        high - 1
+        high.checked_sub(1).unwrap_or_default()
     }
 
     /// Get number of data blocks.

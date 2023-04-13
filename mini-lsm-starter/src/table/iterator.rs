@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::block::BlockIterator;
 use anyhow::Result;
+use bytes::Bytes;
 
 use super::SsTable;
 use crate::iterators::StorageIterator;
@@ -48,6 +49,12 @@ impl SsTableIterator {
         self.seek_to(block_idx)?;
         self.block.seek_to_key(key);
 
+        if self.block.key() < key {
+            // TODO - could be out of bound;
+            self.seek_to(block_idx + 1)?;
+            self.block.seek_to_key(key);
+        }
+
         Ok(())
     }
 
@@ -81,6 +88,29 @@ impl StorageIterator for SsTableIterator {
                 self.seek_to(self.idx + 1)?;
             }
         }
+
+        Ok(())
+    }
+}
+
+impl SsTableIterator {
+    pub fn dump(&mut self) -> Result<()> {
+        let old_key = self.key().to_vec();
+        let old_idx = self.idx;
+
+        while self.is_valid() {
+            println!(
+                "[{:02}] {:?} > {:?}",
+                self.idx,
+                Bytes::copy_from_slice(self.key()),
+                Bytes::copy_from_slice(self.value())
+            );
+
+            self.next()?;
+        }
+
+        self.seek_to(old_idx)?;
+        self.block.seek_to_key(old_key.as_slice());
 
         Ok(())
     }
