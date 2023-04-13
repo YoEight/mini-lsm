@@ -4,18 +4,20 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::block::BlockBuilder;
 use anyhow::Result;
-use bytes::Bytes;
-use crate::block::{Block, BlockBuilder, BlockIterator};
+use bytes::{BufMut, Bytes, BytesMut};
 
 use super::{BlockMeta, SsTable};
 use crate::lsm_storage::BlockCache;
+use crate::table::FileObject;
 
 /// Builds an SSTable from key-value pairs.
 pub struct SsTableBuilder {
     pub(super) meta: Vec<BlockMeta>,
-    pub blocks: Vec<Block>,
+    buffer: BytesMut,
     pub current: BlockBuilder,
+    pub idx: usize,
     // Add other fields you need.
 }
 
@@ -24,59 +26,74 @@ impl SsTableBuilder {
     pub fn new(block_size: usize) -> Self {
         Self {
             meta: vec![],
-            blocks: vec![],
+            idx: 0,
+            buffer: BytesMut::new(),
             current: BlockBuilder::new(block_size),
         }
     }
 
     /// Adds a key-value pair to SSTable
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
-        if self.current.add(key, value) {
-            return;
-        }
+        let mut attempts = 1;
 
-        let mut old_builder = BlockBuilder::new(self.current.block_size());
+        loop {
+            if self.current.add(key, value) {
+                if self.meta.get(self.idx).is_none() {
+                    self.meta.push(BlockMeta {
+                        offset: self.buffer.len(),
+                        first_key: Bytes::from(key.to_vec()),
+                    });
+                }
 
-        std::mem::swap(&mut old_builder, &mut self.current);
+                return;
+            }
 
-        let block = old_builder.build();
-        let block = Arc::new(block);
+            if attempts >= 2 {
+                panic!("Your block size is probably too short for the key/value you want to store");
+            }
 
-        let first_key = {
-            let it = BlockIterator::create_and_seek_to_first(block.clone());
-            Bytes::from(it.key().to_vec())
-        };
+            self.idx += 1;
+            let mut old_builder = BlockBuilder::new(self.current.block_size());
 
-        // Terrible code right there.
-        let block = Arc::try_unwrap(block).unwrap();
+            std::mem::swap(&mut old_builder, &mut self.current);
+            let block = old_builder.build();
 
-        let meta = BlockMeta {
-            offset: self.blocks.len(),
-            first_key,
-        };
-
-        self.blocks.push(block);
-        self.meta.push(meta);
-
-        if !self.current.add(key, value) {
-            panic!("You probably have a too small block size if your key doesn't fit into an empty block");
+            self.buffer.put(block.encode());
+            attempts += 1;
         }
     }
 
     /// Get the estimated size of the SSTable.
     pub fn estimated_size(&self) -> usize {
-        unimplemented!()
+        self.buffer.len()
     }
 
     /// Builds the SSTable and writes it to the given path. No need to actually write to disk until
     /// chapter 4 block cache.
     pub fn build(
-        self,
+        mut self,
         id: usize,
         block_cache: Option<Arc<BlockCache>>,
         path: impl AsRef<Path>,
     ) -> Result<SsTable> {
-        unimplemented!()
+        let block = self.current.build();
+
+        self.buffer.put(block.encode());
+        let block_meta_offset = self.buffer.len();
+
+        for meta in self.meta.iter() {
+            self.buffer.put_u32_le(meta.offset as u32);
+            self.buffer.put_u16_le(meta.first_key.len() as u16);
+            self.buffer.put(meta.first_key.clone());
+        }
+
+        self.buffer.put_u32_le(block_meta_offset as u32);
+
+        Ok(SsTable {
+            file: FileObject(self.buffer.freeze()),
+            block_metas: self.meta,
+            block_meta_offset,
+        })
     }
 
     #[cfg(test)]

@@ -4,6 +4,7 @@
 mod builder;
 mod iterator;
 
+use std::cmp::Ordering;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -75,12 +76,50 @@ impl SsTable {
 
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        unimplemented!()
+        let size = file.size();
+        let meta_offset = file.read(size-4, 4)?;
+        let block_meta_offset = meta_offset.as_slice().get_u32_le() as usize;
+        let meta_size = size - block_meta_offset as u64 - 4;
+        let metas_vec = file.read(block_meta_offset as u64, meta_size)?;
+        let mut metas_bytes = metas_vec.as_slice();
+
+        let mut block_metas = Vec::new();
+
+        while metas_bytes.remaining() > 0 {
+            let offset = metas_bytes.get_u32_le();
+            let key_len = metas_bytes.get_u16_le();
+            let key = metas_bytes.copy_to_bytes(key_len as usize);
+
+            block_metas.push(BlockMeta {
+                offset: offset as usize,
+                first_key: key,
+            });
+        }
+
+        Ok(Self {
+            file,
+            block_metas,
+            block_meta_offset,
+        })
     }
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        let meta = if let Some(meta) = self.block_metas.get(block_idx) {
+            meta
+        } else {
+            anyhow::bail!("Block {} doesn't exist", block_idx)
+        };
+
+        let next_offset = if let Some(next) = self.block_metas.get(block_idx + 1) {
+            next.offset
+        } else {
+            self.block_meta_offset
+        };
+
+        let block_bytes = self.file.read(meta.offset as u64, (next_offset - meta.offset) as u64)?;
+
+        Ok(Arc::new(Block::decode(block_bytes.as_slice())))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
@@ -90,12 +129,40 @@ impl SsTable {
 
     /// Find the block that may contain `key`.
     pub fn find_block_idx(&self, key: &[u8]) -> usize {
-        unimplemented!()
+        let mut low = 0usize;
+        let mut high = self.block_metas.len() -1;
+
+        while low <= high {
+            let mid = (low + high) / 2;
+            let meta = &self.block_metas[mid];
+
+            match meta.first_key.as_ref().cmp(key) {
+                Ordering::Less => {
+                    // To be honest, in that case, it's most likely the table doesn't have the key
+                    if low == self.block_metas.len() - 1 {
+                        break;
+                    }
+
+                    low = mid + 1;
+                }
+                Ordering::Greater => {
+                    // To be honest, in that case, it's most likely the table doesn't have the key
+                    if mid == 0 {
+                        break;
+                    }
+
+                    high = mid - 1;
+                },
+                Ordering::Equal => return mid,
+            }
+        }
+
+        low
     }
 
     /// Get number of data blocks.
     pub fn num_of_blocks(&self) -> usize {
-        unimplemented!()
+        self.block_metas.len()
     }
 }
 

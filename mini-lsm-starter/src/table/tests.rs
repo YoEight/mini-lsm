@@ -74,8 +74,9 @@ fn as_bytes(x: &[u8]) -> Bytes {
 fn test_sst_iterator() {
     let (_dir, sst) = generate_sst();
     let sst = Arc::new(sst);
+    let meta_len = sst.block_metas.len();
     let mut iter = SsTableIterator::create_and_seek_to_first(sst).unwrap();
-    for _ in 0..5 {
+    for offset in 0..5 {
         for i in 0..num_of_keys() {
             let key = iter.key();
             let value = iter.value();
