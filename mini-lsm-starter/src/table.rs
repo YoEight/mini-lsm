@@ -77,7 +77,7 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let size = file.size();
-        let meta_offset = file.read(size-4, 4)?;
+        let meta_offset = file.read(size - 4, 4)?;
         let block_meta_offset = meta_offset.as_slice().get_u32_le() as usize;
         let meta_size = size - block_meta_offset as u64 - 4;
         let metas_vec = file.read(block_meta_offset as u64, meta_size)?;
@@ -117,7 +117,9 @@ impl SsTable {
             self.block_meta_offset
         };
 
-        let block_bytes = self.file.read(meta.offset as u64, (next_offset - meta.offset) as u64)?;
+        let block_bytes = self
+            .file
+            .read(meta.offset as u64, (next_offset - meta.offset) as u64)?;
 
         Ok(Arc::new(Block::decode(block_bytes.as_slice())))
     }
@@ -130,34 +132,23 @@ impl SsTable {
     /// Find the block that may contain `key`.
     pub fn find_block_idx(&self, key: &[u8]) -> usize {
         let mut low = 0usize;
-        let mut high = self.block_metas.len() -1;
+        let mut high = self.block_metas.len() - 1;
 
-        while low <= high {
+        while low < high {
             let mid = (low + high) / 2;
-            let meta = &self.block_metas[mid];
+            let first_key = self.block_metas[mid].first_key.as_ref();
 
-            match meta.first_key.as_ref().cmp(key) {
-                Ordering::Less => {
-                    // To be honest, in that case, it's most likely the table doesn't have the key
-                    if low == self.block_metas.len() - 1 {
-                        break;
-                    }
-
+            match first_key.cmp(key) {
+                Ordering::Greater => {
+                    high = mid;
+                }
+                _ => {
                     low = mid + 1;
                 }
-                Ordering::Greater => {
-                    // To be honest, in that case, it's most likely the table doesn't have the key
-                    if mid == 0 {
-                        break;
-                    }
-
-                    high = mid - 1;
-                },
-                Ordering::Equal => return mid,
             }
         }
 
-        low
+        high - 1
     }
 
     /// Get number of data blocks.

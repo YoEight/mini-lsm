@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::block::BlockIterator;
 use anyhow::Result;
-use crate::block::{BlockIterator};
 
 use super::SsTable;
 use crate::iterators::StorageIterator;
@@ -22,11 +22,7 @@ impl SsTableIterator {
         let idx = 0usize;
         let block = BlockIterator::create_and_seek_to_first(table.read_block(idx)?);
 
-        Ok(Self {
-            table,
-            block,
-            idx,
-        })
+        Ok(Self { table, block, idx })
     }
 
     /// Seek to the first key-value pair.
@@ -48,7 +44,11 @@ impl SsTableIterator {
 
     /// Seek to the first key-value pair which >= `key`.
     pub fn seek_to_key(&mut self, key: &[u8]) -> Result<()> {
-        unimplemented!()
+        let block_idx = self.table.find_block_idx(key);
+        self.seek_to(block_idx)?;
+        self.block.seek_to_key(key);
+
+        Ok(())
     }
 
     fn seek_to(&mut self, idx: usize) -> Result<()> {
